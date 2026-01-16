@@ -299,9 +299,8 @@ impl ObjectServer {
         let member = hdr
             .member()
             .ok_or_else(|| fdo::Error::Failed("Missing member".into()))?;
-        let iface_name = hdr
-            .interface()
-            .ok_or_else(|| fdo::Error::Failed("Missing interface".into()))?;
+        // Interface may be None for interface-less calls (handled by dispatch_method_call_try)
+        let iface_name = hdr.interface().map(|n| n.to_string()).unwrap_or_else(|| "<inferred>".to_string());
 
         trace!("acquiring read lock on interface `{}`", iface_name);
         let read_lock = iface.read().await;
