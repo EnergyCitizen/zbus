@@ -96,6 +96,11 @@ impl Node {
         self.interfaces.get(&interface_name).cloned()
     }
 
+    /// Get all interfaces on this node (for interface-less method call fallback)
+    pub(crate) fn all_interfaces(&self) -> impl Iterator<Item = (&InterfaceName<'static>, &ArcInterface)> {
+        self.interfaces.iter()
+    }
+
     pub(super) fn remove_interface(&mut self, interface_name: InterfaceName<'static>) -> bool {
         self.interfaces.remove(&interface_name).is_some()
     }

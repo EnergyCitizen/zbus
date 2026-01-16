@@ -349,14 +349,7 @@ impl ObjectServer {
         let path = hdr
             .path()
             .ok_or_else(|| fdo::Error::Failed("Missing object path".into()))?;
-        let iface_name = hdr
-            .interface()
-            // TODO: In the absence of an INTERFACE field, if two or more interfaces on the same
-            // object have a method with the same name, it is undefined which of those
-            // methods will be invoked. Implementations may choose to either return an
-            // error, or deliver the message as though it had an arbitrary one of those
-            // interfaces.
-            .ok_or_else(|| fdo::Error::Failed("Missing interface".into()))?;
+        let iface_name_opt = hdr.interface();
         // Check that the message has a member before spawning.
         // Note that an unknown member will still spawn a task. We should instead gather
         // all the details for the call before spawning.
@@ -373,7 +366,7 @@ impl ObjectServer {
             // D-Bus spec: org.freedesktop.DBus.Peer interface works on ANY path, even unregistered
             // ones. See: https://dbus.freedesktop.org/doc/dbus-specification.html#standard-interfaces-peer
             // Switch the path to "/" for Peer interface calls.
-            let path = if *iface_name == fdo::Peer::name() {
+            let path = if iface_name_opt.as_ref().map(|n| **n == fdo::Peer::name()).unwrap_or(false) {
                 ObjectPath::from_static_str_unchecked("/")
             } else {
                 path.clone()
@@ -383,9 +376,26 @@ impl ObjectServer {
                 .get_child(&path)
                 .ok_or_else(|| fdo::Error::UnknownObject(format!("Unknown object '{path}'")))?;
 
-            let iface = node.interface_lock(iface_name.as_ref()).ok_or_else(|| {
-                fdo::Error::UnknownInterface(format!("Unknown interface '{iface_name}'"))
-            })?;
+            // If interface is specified, use it directly
+            // If not, find the first non-standard interface (per D-Bus spec, behavior is undefined
+            // when multiple interfaces have the same method - we pick the first user interface)
+            let iface = if let Some(iface_name) = &iface_name_opt {
+                node.interface_lock(iface_name.as_ref()).ok_or_else(|| {
+                    fdo::Error::UnknownInterface(format!("Unknown interface '{iface_name}'"))
+                })?
+            } else {
+                // Find first non-standard interface for interface-less calls
+                node.all_interfaces()
+                    .filter(|(name, _)| {
+                        **name != fdo::Peer::name()
+                            && **name != fdo::Introspectable::name()
+                            && **name != fdo::Properties::name()
+                            && **name != fdo::ObjectManager::name()
+                    })
+                    .map(|(_, iface)| iface.clone())
+                    .next()
+                    .ok_or_else(|| fdo::Error::Failed("No user interface found for interface-less call".into()))?
+            };
             (iface.instance, iface.spawn_tasks_for_methods)
         };
 
